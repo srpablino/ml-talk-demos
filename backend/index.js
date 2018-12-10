@@ -28,23 +28,26 @@ const gcloud = require('google-cloud')({
   keyFilename: 'keyfile.json',
   projectId: config.project_id
 });
-const bigquery = gcloud.bigquery();
-const dataset = bigquery.dataset(config.bigquery_dataset);
-const table = dataset.table(config.bigquery_table);
 
 const Filter = require('bad-words'),
   filter = new Filter();
 
 // Replace searchTerms with whatever tweets you want to stream
 // Details here: https://dev.twitter.com/streaming/overview/request-parameters#track
-const searchTerms = 'googleio,googledevelopers,googlecloud,firebase,machine learning,io17,googleio17';
-
+//const aux = 'pitbull,Poodle,dalmatian,German Shepherd,Chihuahua,akita,doberman,buldog,husky';
+//const aux = 'blue,grey,white,yellow,black,pink,red,green,purple,brown';
+const aux = 'machine learning,big data,ai,data science,google,no sql,sql,iot,data mining';
+//const aux = 'XSB,Apache Kafka,DynamoDB,Apache Hive,MongoDB,CouchBase,CouchDB,Berkeley DB,MemSQL,Redis,Memcached,MarkLogic,Cassandra,db4o,Firebase,ElasticSearch,Sphinx,Rasdaman,InfluxDB,Kdb+,Apache HBase,BaseX';
+//const aux = 'mcdonalds,burgerking,pizzahut,kfc,starbucks'
+//const aux = 'United States of America, Afghanistan, Albania, Algeria, Andorra, Angola, Antigua & Deps, Argentina, Armenia, Australia, Austria, Azerbaijan, Bahamas, Bahrain, Bangladesh, Barbados, Belarus, Belgium, Belize, Benin, Bhutan, Bolivia, Bosnia Herzegovina, Botswana, Brazil, Brunei, Bulgaria, Burkina, Burma, Burundi, Cambodia, Cameroon, Canada, Cape Verde, Central African Rep, Chad, Chile,Republic of China, Republic of China, Colombia, Comoros, Democratic Republic of the Congo, Republic of the Congo, Costa Rica,, Croatia, Cuba, Cyprus, Czech Republic, Danzig, Denmark, Djibouti, Dominica, Dominican Republic, East Timor, Ecuador, Egypt, El Salvador, Equatorial Guinea, Eritrea, Estonia, Ethiopia, Fiji, Finland, France, Gabon, Gaza Strip, The Gambia, Georgia, Germany, Ghana, Greece, Grenada, Guatemala, Guinea, Guinea-Bissau, Guyana, Haiti, Holy Roman Empire, Honduras, Hungary, Iceland, India, Indonesia, Iran, Iraq, Republic of Ireland, Israel, Italy, Ivory Coast, Jamaica, Japan, Jonathanland, Jordan, Kazakhstan, Kenya, Kiribati, North Korea, South Korea, Kosovo, Kuwait, Kyrgyzstan, Laos, Latvia, Lebanon, Lesotho, Liberia, Libya, Liechtenstein, Lithuania, Luxembourg, Macedonia, Madagascar, Malawi, Malaysia, Maldives, Mali, Malta, Marshall Islands, Mauritania, Mauritius, Mexico, Micronesia, Moldova, Monaco, Mongolia, Montenegro, Morocco, Mount Athos, Mozambique, Namibia, Nauru, Nepal, Newfoundland, Netherlands, New Zealand, Nicaragua, Niger, Nigeria, Norway, Oman, Ottoman Empire, Pakistan, Palau, Panama, Papua New Guinea, Paraguay, Peru, Philippines, Poland, Portugal, Prussia, Qatar, Romania, Rome, Russian Federation, Rwanda, St Kitts & Nevis, St Lucia, Saint Vincent & the, Grenadines, Samoa, San Marino, Sao Tome & Principe, Saudi Arabia, Senegal, Serbia, Seychelles, Sierra Leone, Singapore, Slovakia, Slovenia, Solomon Islands, Somalia, South Africa, Spain, Sri Lanka, Sudan, Suriname, Swaziland, Sweden, Switzerland, Syria, Tajikistan, Tanzania, Thailand, Togo, Tonga, Trinidad & Tobago, Tunisia, Turkey, Turkmenistan, Tuvalu, Uganda, Ukraine, United Arab Emirates, United Kingdom, Uruguay, Uzbekistan, Vanuatu, Vatican City, Venezuela, Vietnam, Yemen, Zambia, Zimbabwe'
+const searchTerms = aux.replace(/\s/g,'').toLowerCase();
 // Add a filter-level param?
 client.stream('statuses/filter', {track: searchTerms, language: 'en'}, function(stream) {
   stream.on('data', function(event) {
                 // Exclude tweets starting with "RT"
-                if ((event.text != undefined) && (event.text.substring(0,2) != 'RT') && (event.text === filter.clean(event.text))) {
-                        callNLApi(event);
+                //if ((event.text != undefined) && (event.text.substring(0,2) != 'RT') && (event.text === filter.clean(event.text))) {
+                if ((event.text != undefined) && (event.text.substring(0,2) != 'RT')) {
+					callNLApi(event);
                 }
   });
   stream.on('error', function(error) {
@@ -62,60 +65,58 @@ admin.initializeApp({
 });
 
 const db = admin.database();
+
+db.ref('latest').remove();
+db.ref('keywordData').remove();
+db.ref('keywords').remove();
+
 const tweetRef = db.ref('latest');
-const hashtagRef = db.ref('hashtags');
+const keywordDataRef = db.ref('keywordData');
+const keywordRef = db.ref('keywords');
+const acceptedWordTypes = searchTerms.split(',');
+keywordRef.set(acceptedWordTypes);
 
 // Uses a Firebase transaction to incrememnt a counter
 function incrementCount(ref, child, valToIncrement) {
   ref.child(child).transaction(function(data) {
     if (data != null) {
-      data += valToIncrement;
+		data += valToIncrement;
     } else {
-      data = 1;
+		data = valToIncrement;
     }
     return data;
   });
 }
 
-
 tweetRef.on('value', function (snap) {
     if (snap.exists()) {
       let tweet = snap.val();
       let tokens = tweet['tokens'];
-      let hashtags = tweet['hashtags'];
-  
+        
       for (let i in tokens) {
         let token = tokens[i];
-        let word = token.lemma.toLowerCase();
+        let lema = token.lemma.replace(/\s/g,'').toLowerCase();
   
-        if ((acceptedWordTypes.indexOf(token.partOfSpeech.tag) != -1) && !(word.match(/[^A-Za-z0-9]/g))) {
-          let posRef = db.ref('tokens/' + token.partOfSpeech.tag);
-          incrementCount(posRef, word, 1);
-        }
-  
-      }
-  
-      if (hashtags) {
-        for (let i in hashtags) {
-          let ht = hashtags[i];
-          let text = ht.text.toLowerCase();
-          let htRef = hashtagRef.child(text);
-          incrementCount(htRef, 'totalScore', tweet.score);
-          incrementCount(htRef, 'numMentions', 1);
+        //if ((acceptedWordTypes.indexOf(token.partOfSpeech.tag) != -1) && !(word.match(/[^A-Za-z0-9]/g))) {
+        if ((acceptedWordTypes.indexOf(lema) != -1)) {
+			let ref = keywordDataRef.child(lema);
+			incrementCount(ref, 'totalScore', tweet.score);
+			incrementCount(ref, 'numMentions', 1);
+			
         }
       }
     }
 });
 
-
-const acceptedWordTypes = ['ADJ']; // Add the parts of speech you'd like to graph to this array ('NOUN', 'VERB', etc.)
-
 function callNLApi(tweet) {
+	    const quoted = tweet.quoted_status?tweet.quoted_status.text:'';
+		const tweetText = tweet.extended_tweet?tweet.extended_tweet.full_text:tweet.full_text?tweet.full_text:tweet.text + quoted; 
+		const textToSave = tweetText + " " + quoted; 
         const textUrl = "https://language.googleapis.com/v1/documents:annotateText?key=" + config.cloud_api_key;
         let requestBody = {
                 "document": {
                         "type": "PLAIN_TEXT",
-                        "content": tweet.text
+                        "content": textToSave
                 },
                 "features": {
                   "extractSyntax": true,
@@ -135,39 +136,17 @@ function callNLApi(tweet) {
                 if ((!err && resp.statusCode == 200) && (body.sentences.length != 0)) {
                         let tweetForFb = {
                           id: tweet.id_str,
-                          text: tweet.text,
+                          text: textToSave,
                           user: tweet.user.screen_name,
                           user_time_zone: tweet.user.time_zone,
                           user_followers_count: tweet.user.followers_count,
-                          hashtags: tweet.entities.hashtags,
+                          //hashtags: tweet.entities.hashtags,
                           tokens: body.tokens,
                           score: body.documentSentiment.score,
                           magnitude: body.documentSentiment.magnitude,
                           entities: body.entities
                         };
-
-                        let bqRow = {
-                          id: tweet.id_str,
-                          text: tweet.text,
-                          user: tweet.user.screen_name,
-                          user_time_zone: tweet.user.time_zone,
-                          user_followers_count: tweet.user.followers_count,
-                          hashtags: JSON.stringify(tweet.entities.hashtags),
-                          tokens: JSON.stringify(body.tokens),
-                          score: body.documentSentiment.score,
-                          magnitude: body.documentSentiment.magnitude,
-                          entities: JSON.stringify(body.entities)
-                        }
-
                         tweetRef.set(tweetForFb);
-                        table.insert(bqRow, function(error, insertErr, apiResp) {
-                          if (error) {
-                            console.log('err', error);
-                          } else if (insertErr.length == 0) {
-                            console.log('success!');
-                          }
-                        });
-
                 } else {
                         console.log('NL API error: ', err);
                 }
